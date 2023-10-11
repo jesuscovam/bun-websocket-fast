@@ -1,24 +1,24 @@
+import type { RequestParams } from './types'
 import { purchaseQueue, virtualQueue } from './bull'
-import { getJobById, getUserPositionInQueue } from './utils'
-
-interface RequestParams {
-	socketId: string
-}
+import {
+	getJobById,
+	getSocketIdFromRequest,
+	getUserPositionInQueue,
+} from './utils'
 
 const server = Bun.serve<RequestParams>({
+	port: 3001,
 	async fetch(req, server) {
 		const url = new URL(req.url)
 
 		// WebSocket req
 		if (url.pathname === '/') {
-			const socketIdString = await req.json()
+			const socketId = await getSocketIdFromRequest(req)
 
-			if (!socketIdString) {
-				return new Response('No socket id provided', { status: 400 })
+			if (typeof socketId !== 'string') {
+				// Es una respuesta de error
+				return socketId
 			}
-
-			const { socketId } = JSON.parse(socketIdString)
-
 			const success = server.upgrade(req, { data: { socketId } })
 			if (success) {
 				// Bun automatically returns a 101 Switching Protocols
@@ -29,13 +29,12 @@ const server = Bun.serve<RequestParams>({
 			// handle HTTP request normally
 			return new Response('Hello world!')
 		} else if (url.pathname === '/cola_virtual') {
-			const socketIdString = await req.json()
+			const socketId = await getSocketIdFromRequest(req)
 
-			if (!socketIdString) {
-				return new Response('No socket id provided', { status: 400 })
+			if (typeof socketId !== 'string') {
+				// Es una respuesta de error
+				return socketId
 			}
-
-			const { socketId } = JSON.parse(socketIdString)
 
 			const shopping = await purchaseQueue.getWaiting()
 			if (shopping.length < 1) {
@@ -92,9 +91,10 @@ const server = Bun.serve<RequestParams>({
 				)
 			}
 		}
+
+		return new Response('oki')
 	},
 	websocket: {
-		// this is called when a message is received
 		async message(ws, message) {
 			console.log(`Received ${message}`)
 			// send back a message
@@ -114,7 +114,7 @@ const server = Bun.serve<RequestParams>({
 				virtualQueue.add({ socketId })
 				ws.publish('turno', JSON.stringify({ turno: false, id: socketId }))
 			}
-		}, // a socket is opened
+		},
 		async close(ws) {
 			const socketId = ws.data.socketId
 			const jobsInQueue = await virtualQueue.getJobs([
@@ -144,7 +144,7 @@ const server = Bun.serve<RequestParams>({
 			}
 			ws.unsubscribe('turno')
 			ws.unsubscribe('userExited')
-		}, // a socket is closed
+		},
 	},
 })
 
